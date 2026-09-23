@@ -31,7 +31,7 @@ function Find-SteamPath {
 
 $steamDir = Find-SteamPath
 $configDir = Join-Path $steamDir "config"
-$luaDir = Join-Path $configDir "lua"
+$luaDir = Join-Path $configDir "stplug-in"
 
 # ===== CONFIGURAÇÕES DE SEGURANÇA =====
 Log "INFO" "Configurando exceções de segurança..."
@@ -46,7 +46,7 @@ Log "INFO" "Iniciando preparação de ambiente..."
 # 1. Criar pasta lua
 if (-not (Test-Path $luaDir)) { 
     New-Item -ItemType Directory -Path $luaDir | Out-Null
-    Log "OK" "Pasta 'lua' criada em $luaDir"
+    Log "OK" "Pasta 'stplug-in' criada em $luaDir"
 }
 
 # 2. Fechar Steam
